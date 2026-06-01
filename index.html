@@ -15,7 +15,7 @@
         <div class="brand">
           <span id="statusDot" class="status-dot" aria-hidden="true"></span>
           <div>
-            <h1>Birdsong Neon Graph</h1>
+            <!-- title removed -->
             <p id="statusText">Pronto</p>
           </div>
         </div>
@@ -31,12 +31,7 @@
             <span>Microfono</span>
           </button>
 
-          <button id="demoButton" class="button" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m8 5 11 7-11 7V5Z" />
-            </svg>
-            <span>Demo</span>
-          </button>
+          <!-- demo button removed -->
 
           <button id="clearButton" class="icon-button" type="button" title="Pulisci grafico" aria-label="Pulisci grafico">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -50,33 +45,23 @@
         </nav>
       </header>
 
-      <section class="readout" aria-label="letture audio">
-        <div class="metric">
-          <span>Canto</span>
-          <strong id="birdScore">0%</strong>
-        </div>
-        <div class="metric">
-          <span>Centro</span>
-          <strong id="centroid">0.0 kHz</strong>
-        </div>
-        <div class="metric">
-          <span>Picchi</span>
-          <strong id="peakCount">0</strong>
-        </div>
-      </section>
+      <!-- Readout removed: Canto/Centro/Picchi -->
 
       <aside class="tuning" aria-label="taratura">
         <label>
           <span>Sensibilita</span>
-          <input id="sensitivity" type="range" min="0" max="100" value="68" />
+          <!-- lowered default sensitivity slightly -->
+          <input id="sensitivity" type="range" min="0" max="100" value="54" />
         </label>
         <label>
           <span>Filtro basso</span>
-          <input id="lowFocus" type="range" min="1000" max="4000" step="100" value="1800" />
+          <!-- raised default low cutoff to focus on higher bands -->
+          <input id="lowFocus" type="range" min="1000" max="4000" step="100" value="2400" />
         </label>
         <label>
           <span>Filtro alto</span>
-          <input id="highFocus" type="range" min="5500" max="12000" step="100" value="9500" />
+          <!-- lowered default high cutoff to narrow focus -->
+          <input id="highFocus" type="range" min="5500" max="12000" step="100" value="6500" />
         </label>
       </aside>
     </main>

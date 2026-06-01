@@ -3,16 +3,13 @@ const ctx = canvas.getContext("2d", { alpha: false });
 
 const ui = {
   micButton: document.querySelector("#micButton"),
-  demoButton: document.querySelector("#demoButton"),
   clearButton: document.querySelector("#clearButton"),
   statusDot: document.querySelector("#statusDot"),
   statusText: document.querySelector("#statusText"),
   sensitivity: document.querySelector("#sensitivity"),
   lowFocus: document.querySelector("#lowFocus"),
   highFocus: document.querySelector("#highFocus"),
-  birdScore: document.querySelector("#birdScore"),
-  centroid: document.querySelector("#centroid"),
-  peakCount: document.querySelector("#peakCount"),
+  // birdScore/centroid/peakCount readout removed from UI
 };
 
 const state = {
@@ -42,6 +39,9 @@ const state = {
   sparks: [],
   labels: [],
   spectrumHistory: [],
+  // frequency occurrence tracking (bins across focus range)
+  freqBins: 72,
+  freqCounts: new Float32Array(72),
 };
 
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -116,7 +116,6 @@ async function startMicrophone() {
     state.prevData = new Float32Array(state.analyser.frequencyBinCount);
     state.sampleRate = state.audioContext.sampleRate;
     ui.micButton.classList.add("active");
-    ui.demoButton.classList.remove("active");
     ui.micButton.querySelector("span").textContent = "Stop";
     setStatus("Ascolto", "live");
   } catch (error) {
@@ -153,14 +152,13 @@ function toggleDemo() {
   stopMicrophone();
   state.demoMode = true;
   state.nextDemoChirp = performance.now() + 180;
-  ui.demoButton.classList.add("active");
+  // demo mode removed; keep demoMode state but do not toggle UI
   setStatus("Demo", "live");
 }
 
 function stopDemo() {
   state.demoMode = false;
   state.demoChirps.length = 0;
-  ui.demoButton.classList.remove("active");
   if (!state.stream) setStatus("Pronto", "idle");
 }
 
@@ -353,10 +351,7 @@ function analyzeSpectrum(data, now) {
 }
 
 function updateReadout(detected) {
-  ui.birdScore.textContent = `${Math.round(state.score * 100)}%`;
-  ui.centroid.textContent = `${(state.centroid / 1000 || 0).toFixed(1)} kHz`;
-  ui.peakCount.textContent = String(state.peakCount);
-
+  // Readout removed; only update status indicator
   if (detected) {
     setStatus("Canto rilevato", "detecting");
   } else if (state.stream || state.demoMode) {
@@ -366,10 +361,50 @@ function updateReadout(detected) {
 
 function colorForFreq(freq) {
   const { low, high } = getFocusRange();
+  // Map frequency to normalized t (0..1)
   const t = clamp((freq - low) / Math.max(1, high - low));
-  if (t < 0.33) return { r: 255, g: 59 + 120 * t, b: 215, css: "#ff3bd7" };
-  if (t < 0.7) return { r: 43, g: 247, b: 255, css: "#2bf7ff" };
-  return { r: 182, g: 255, b: 92, css: "#b6ff5c" };
+
+  // get occurrence weight from freqCounts (bin), decayed over time elsewhere
+  const bin = clamp(Math.floor(((freq - low) / Math.max(1, high - low)) * state.freqBins), 0, state.freqBins - 1);
+  const occ = state.freqCounts[bin] || 0;
+  // normalize occurrence to 0..1 (soft curve)
+  const occNorm = clamp(1 - Math.exp(-occ * 0.18));
+
+  // Hue from t across a pleasant spectrum (300 -> 120 deg)
+  const hue = lerp(300, 120, t); // pink -> cyan -> lime
+  const sat = Math.round(48 + occNorm * 36); // 48% -> up to ~84%
+  const light = Math.round(40 + occNorm * 26); // 40% -> up to ~66%
+
+  // convert HSL to RGB
+  const h = hue / 360;
+  const s = sat / 100;
+  const l = light / 100;
+
+  function hslToRgb(h, s, l) {
+    let r, g, b;
+    if (s === 0) {
+      r = g = b = l; // achromatic
+    } else {
+      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      const p = 2 * l - q;
+      const hk = h;
+      const tc = [hk + 1 / 3, hk, hk - 1 / 3].map((t) => {
+        let tt = t;
+        if (tt < 0) tt += 1;
+        if (tt > 1) tt -= 1;
+        if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+        if (tt < 1 / 2) return q;
+        if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+        return p;
+      });
+      [r, g, b] = tc;
+    }
+    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+  }
+
+  const rgb = hslToRgb(h, s, l);
+  const css = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  return { r: rgb.r, g: rgb.g, b: rgb.b, css };
 }
 
 function spawnGraph(peaks, band, now) {
@@ -378,41 +413,53 @@ function spawnGraph(peaks, band, now) {
   const scaleByViewport = Math.min(state.width, state.height) / 620;
 
   for (const peak of chosen.slice(0, 6)) {
+    // reduce to top 3 per spawn to avoid clutter
     const f = clamp((peak.freq - low) / Math.max(1, high - low));
     const energy = clamp(peak.amp);
     const color = colorForFreq(peak.freq);
     const ribbon = Math.sin(now * 0.0018 + f * Math.PI * 4);
 
+    // depth (z) maps to energy: stronger peaks appear closer (negative z -> closer)
     state.nodes.push({
-        x: (f - 0.5) * 2.65 + random(-0.06, 0.06),
-        y: ribbon * 0.52 + random(-0.08, 0.08),
-        z: random(-0.28, 0.28),
-        // velocities set to zero to keep the graph static/centered
-        vx: 0,
-        vy: 0,
-        vz: 0,
+      x: (f - 0.5) * 2.2 + random(-0.03, 0.03),
+      y: ribbon * 0.42 + random(-0.04, 0.04),
+      // map energy (0..1) so 0 -> slightly far (0.8), 1 -> close (-1.2), plus small jitter
+      z: lerp(0.8, -1.2, energy) + random(-0.12, 0.12),
+      // velocities set to zero to keep the graph static/centered
+      vx: 0,
+      vy: 0,
+      vz: 0,
       freq: peak.freq,
-      size: (2.5 + energy * 7.5) * scaleByViewport,
+      size: (2.5 + energy * 6.0) * scaleByViewport,
       color,
       energy,
       born: now,
-      life: random(4200, 7600),
+      // shorter life so nodes don't accumulate too long
+      life: random(2800, 5200),
     });
 
-    if (energy > 0.36) {
+    // bump frequency occurrence bin (lightweight)
+    const binIndex = clamp(Math.floor(((peak.freq - low) / Math.max(1, high - low)) * state.freqBins), 0, state.freqBins - 1);
+    state.freqCounts[binIndex] = (state.freqCounts[binIndex] || 0) + 1;
+
+    // fewer sparks and only for stronger energies
+    if (energy > 0.6) {
+      // spark z biased toward the node's depth so sparks cluster near their source
+      const sparkZ = lerp(0.3, -0.6, energy) + random(-0.08, 0.08);
       state.sparks.push({
-        x: (f - 0.5) * 2.65,
-        y: ribbon * 0.5,
-        z: random(-0.72, 0.72),
+        x: (f - 0.5) * 2.2,
+        y: ribbon * 0.42,
+        z: sparkZ,
         radius: 0,
         color,
         born: now,
-        life: random(520, 900),
+        life: random(320, 620),
       });
     }
   }
 
-  if (state.nodes.length > 560) state.nodes.splice(0, state.nodes.length - 560);
+  // global cap lower to reduce clutter
+  if (state.nodes.length > 260) state.nodes.splice(0, state.nodes.length - 260);
 }
 
 function spawnLabel(peak, now) {
@@ -442,11 +489,12 @@ function updateEntities(now, dt) {
 function project(point, now) {
   const compact = state.width < 720;
   const scale = Math.min(state.width, state.height) * (compact ? 0.31 : 0.39);
-  // Fix center to true center of canvas and remove time-based rotation/tilt
+  // Fix center to true center of canvas
   const centerX = state.width * 0.5;
   const centerY = state.height * 0.5;
-  const turn = 0; // no rotation
-  const tilt = 0; // no tilt
+    // Introduce a slower, subtler rotation and tilt (reduced amplitude)
+    const turn = Math.sin(now * 0.00012) * 0.18; // yaw
+    const tilt = Math.cos(now * 0.00009) * 0.06; // pitch
   const cosY = Math.cos(turn);
   const sinY = Math.sin(turn);
   const cosX = Math.cos(tilt);
@@ -457,7 +505,8 @@ function project(point, now) {
   let y = point.y * cosX - z * sinX;
   z = point.y * sinX + z * cosX;
 
-  const perspective = clamp(1.65 / Math.max(0.42, 1.65 + z), 0.38, 2.8);
+  // Stronger perspective mapping: objects with larger z appear much closer/farther
+  const perspective = clamp(1.4 / Math.max(0.28, 1.4 + z * 0.9), 0.28, 4.0);
   return {
     x: centerX + x * scale * perspective,
     y: centerY + y * scale * perspective,
@@ -511,7 +560,7 @@ function drawSpectrum(data) {
   }
 
   state.spectrumHistory.push(row);
-  if (state.spectrumHistory.length > 90) state.spectrumHistory.shift();
+  if (state.spectrumHistory.length > 42) state.spectrumHistory.shift();
 
   const width = Math.min(680, state.width - 36);
   const height = state.width < 720 ? 82 : 96;
@@ -552,7 +601,8 @@ function drawEdges(now) {
   // with the focus range so it behaves sensibly on different settings.
   const { low, high } = getFocusRange();
   const focusWidth = Math.max(1, high - low);
-  const tolHz = Math.max(120, focusWidth * 0.06); // tolerance in Hz
+  // Increase tolerance so groups are wider: higher minimum and larger fraction
+  const tolHz = Math.max(240, focusWidth * 0.12); // tolerance in Hz (increased)
   // Convert tolHz to normalized freq space (0..1) matching how node.freq is used
   const tolNorm = tolHz / Math.max(1, focusWidth);
 
@@ -575,16 +625,25 @@ function drawEdges(now) {
     }
   }
 
-  // For each group, sort by birth time and draw sequential connections
+  // Cache projections to allow depth sorting
   for (const g of groups) {
     if (g.nodes.length < 2) continue;
     g.nodes.sort((a, b) => a.born - b.born);
+    // build projected pairs with depth as average of both
+    const pairs = [];
     for (let i = 0; i < g.nodes.length - 1; i += 1) {
       const a = g.nodes[i];
       const b = g.nodes[i + 1];
-      const ageA = clamp(1 - (now - a.born) / a.life);
       const pa = project(a, now);
       const pb = project(b, now);
+      const depth = (pa.p + pb.p) * 0.5;
+      pairs.push({ a, b, pa, pb, depth });
+    }
+    // sort pairs by depth ascending (draw far first)
+    pairs.sort((u, v) => u.depth - v.depth);
+    for (const pair of pairs) {
+      const { a, b, pa, pb } = pair;
+      const ageA = clamp(1 - (now - a.born) / a.life);
       const alpha = 0.46 * ageA * (0.35 + state.score);
       ctx.strokeStyle = `rgba(${a.color.r}, ${a.color.g}, ${a.color.b}, ${alpha})`;
       ctx.lineWidth = Math.max(0.6, 1.6 * a.energy * pa.p);
@@ -602,33 +661,49 @@ function drawNodes(now) {
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
 
-  for (const spark of state.sparks) {
+  // Project and collect renderables with depth
+  const renderSparks = state.sparks.map((spark) => {
     const age = clamp((now - spark.born) / spark.life);
     const p = project(spark, now);
     const radius = (20 + 72 * age) * p.p * (0.5 + state.score);
-    ctx.strokeStyle = `rgba(${spark.color.r}, ${spark.color.g}, ${spark.color.b}, ${(1 - age) * 0.24})`;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+    return { spark, p, radius, age, depth: p.p };
+  });
 
-  for (const node of state.nodes) {
+  const renderNodes = state.nodes.map((node) => {
     const age = clamp(1 - (now - node.born) / node.life);
     const p = project(node, now);
     const radius = node.size * p.p * (0.7 + state.score * 0.55);
-    ctx.shadowColor = node.color.css;
-    ctx.shadowBlur = 20 + 28 * node.energy;
-    ctx.fillStyle = `rgba(${node.color.r}, ${node.color.g}, ${node.color.b}, ${0.23 + age * 0.66})`;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-    ctx.fill();
+    return { node, p, radius, age, depth: p.p };
+  });
 
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = `rgba(255, 255, 255, ${0.48 * age})`;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, Math.max(1.2, radius * 0.32), 0, Math.PI * 2);
-    ctx.fill();
+  // Draw farthest first (smaller p => farther depending on mapping)
+  const allRender = [...renderSparks.map((r) => ({ type: 'spark', ...r })), ...renderNodes.map((r) => ({ type: 'node', ...r }))];
+  allRender.sort((a, b) => a.depth - b.depth);
+
+  for (const item of allRender) {
+    if (item.type === 'spark') {
+      // very subtle sparks
+      ctx.strokeStyle = `rgba(${item.spark.color.r}, ${item.spark.color.g}, ${item.spark.color.b}, ${(1 - item.age) * 0.06})`;
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.arc(item.p.x, item.p.y, item.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      const node = item.node;
+      // remove glow entirely for minimal brightness
+      ctx.shadowBlur = 0;
+      // very low fill alpha
+      ctx.fillStyle = `rgba(${node.color.r}, ${node.color.g}, ${node.color.b}, ${0.06 + item.age * 0.18})`;
+      ctx.beginPath();
+      ctx.arc(item.p.x, item.p.y, item.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // subtle inner highlight
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.12 * item.age})`;
+      ctx.beginPath();
+      ctx.arc(item.p.x, item.p.y, Math.max(1.0, item.radius * 0.28), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   ctx.restore();
@@ -650,7 +725,7 @@ function drawLabels(now) {
     const height = 24;
     const x = p.x + 12;
     const y = p.y - height / 2;
-
+    if (state.spectrumHistory.length > 42) state.spectrumHistory.shift();
     ctx.strokeStyle = `rgba(${label.color.r}, ${label.color.g}, ${label.color.b}, ${0.62 * alpha})`;
     ctx.fillStyle = `rgba(1, 3, 9, ${0.48 * alpha})`;
     ctx.lineWidth = 1;
@@ -673,9 +748,9 @@ function drawPulse(now) {
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   const gradient = ctx.createRadialGradient(center.x, center.y, 0, center.x, center.y, radius * 3.1);
-  gradient.addColorStop(0, `rgba(255, 255, 255, ${0.16 + state.score * 0.22})`);
-  gradient.addColorStop(0.25, `rgba(255, 59, 215, ${0.12 + state.score * 0.2})`);
-  gradient.addColorStop(0.68, `rgba(43, 247, 255, ${0.05 + state.score * 0.11})`);
+  gradient.addColorStop(0, `rgba(255, 255, 255, ${0.08 + state.score * 0.11})`);
+  gradient.addColorStop(0.25, `rgba(255, 59, 215, ${0.06 + state.score * 0.1})`);
+  gradient.addColorStop(0.68, `rgba(43, 247, 255, ${0.03 + state.score * 0.055})`);
   gradient.addColorStop(1, "rgba(1, 3, 9, 0)");
   ctx.fillStyle = gradient;
   ctx.beginPath();
@@ -704,6 +779,12 @@ function frame(now) {
   if (data) analyzeSpectrum(data, now);
   updateEntities(now, dt);
 
+  // decay frequency occurrence counts slowly (per-frame)
+  const decay = 1 - Math.min(0.08, dt * 0.00032);
+  for (let i = 0; i < state.freqCounts.length; i += 1) {
+    state.freqCounts[i] = Math.max(0, state.freqCounts[i] * decay);
+  }
+
   drawBackground(now);
   drawSpectrum(data);
   drawPulse(now);
@@ -715,7 +796,6 @@ function frame(now) {
 }
 
 ui.micButton.addEventListener("click", startMicrophone);
-ui.demoButton.addEventListener("click", toggleDemo);
 ui.clearButton.addEventListener("click", clearGraph);
 window.addEventListener("resize", resizeCanvas);
 
