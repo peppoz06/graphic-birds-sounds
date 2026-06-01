@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Birdsong Neon Graph</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="stage" aria-label="Birdsong Neon Graph">
+      <canvas id="visualizer" aria-hidden="true"></canvas>
+      <div class="scanlines" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <div class="brand">
+          <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h1>Birdsong Neon Graph</h1>
+            <p id="statusText">Pronto</p>
+          </div>
+        </div>
+
+        <nav class="actions" aria-label="controlli principali">
+          <button id="micButton" class="button primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 14.5a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5.5a3 3 0 0 0 3 3Z" />
+              <path d="M19 11.5a7 7 0 0 1-14 0" />
+              <path d="M12 18.5V22" />
+              <path d="M8.5 22h7" />
+            </svg>
+            <span>Microfono</span>
+          </button>
+
+          <button id="demoButton" class="button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 5 11 7-11 7V5Z" />
+            </svg>
+            <span>Demo</span>
+          </button>
+
+          <button id="clearButton" class="icon-button" type="button" title="Pulisci grafico" aria-label="Pulisci grafico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 6h18" />
+              <path d="M8 6V4h8v2" />
+              <path d="m19 6-1 14H6L5 6" />
+              <path d="M10 11v5" />
+              <path d="M14 11v5" />
+            </svg>
+          </button>
+        </nav>
+      </header>
+
+      <section class="readout" aria-label="letture audio">
+        <div class="metric">
+          <span>Canto</span>
+          <strong id="birdScore">0%</strong>
+        </div>
+        <div class="metric">
+          <span>Centro</span>
+          <strong id="centroid">0.0 kHz</strong>
+        </div>
+        <div class="metric">
+          <span>Picchi</span>
+          <strong id="peakCount">0</strong>
+        </div>
+      </section>
+
+      <aside class="tuning" aria-label="taratura">
+        <label>
+          <span>Sensibilita</span>
+          <input id="sensitivity" type="range" min="0" max="100" value="68" />
+        </label>
+        <label>
+          <span>Filtro basso</span>
+          <input id="lowFocus" type="range" min="1000" max="4000" step="100" value="1800" />
+        </label>
+        <label>
+          <span>Filtro alto</span>
+          <input id="highFocus" type="range" min="5500" max="12000" step="100" value="9500" />
+        </label>
+      </aside>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
